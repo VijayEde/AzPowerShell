@@ -5,8 +5,12 @@
 $ProgressPreference = "SilentlyContinue"
 
 $RepositoryName = 'PSGallery'
+$ACRRepositoryName = "ACRRepo"
+$ACRRepoUri = "https://psresourcegettest.azurecr.io/"
 $TestModule = 'newTestModule'
 $TestScript = 'TestTestScript'
+$ACRTestModule = 'newTestMod'
+
 $Initialized = $false
 
 #region Install locations for modules and scripts
@@ -76,6 +80,15 @@ function Initialize
     else
     {
         Register-PSResourceRepository -PSGallery -Trusted
+    }
+
+    $usingAzAuth = $env:USINGAZAUTH -eq 'true'
+
+    Write-Verbose "Using AzAuth: $usingAzAuth"
+
+    if ($usingAzAuth)
+    {
+        Register-PSResourceRepository -Name $ACRRepositoryName -Uri $ACRRepoUri -ApiVersion 'ContainerRegistry' -Trusted -Force
     }
 }
 
@@ -211,5 +224,64 @@ Describe "PSResourceGet - Script tests (Admin)" -Tags @('Feature', 'RequireAdmin
 
     AfterAll {
         Remove-InstalledScripts
+    }
+}
+
+Describe "PSResourceGet - ACR tests" -tags "Feature" {
+
+    BeforeAll {
+        Write-Verbose -Verbose "BeforeAll - Using AzAuth = $env:USINGAZAUTH"
+        if ($env:USINGAZAUTH -ne 'true') {
+            return
+        }
+
+        if ($script:Initialized -eq $false) {
+            Initialize
+            $script:Initialized = $true
+        }
+    }
+
+    BeforeEach {
+        if ($env:USINGAZAUTH -ne 'true') {
+            return
+        }
+
+        Remove-InstalledModules
+    }
+
+    It "Should find a module correctly" {
+        $isSkipped = $env:USINGAZAUTH -ne 'true'
+
+        Set-ItResult -Skipped:$isSkipped -Because "The tests require the USINGAZAUTH environment variable to be set to 'true' for ACR authentication."
+
+        $psgetModuleInfo = Find-PSResource -Name $ACRTestModule -Repository $ACRRepositoryName
+        $ACRRepositoryName.Name | Should -Be $ACRTestModule
+        $psgetModuleInfo.Repository | Should -Be $ACRRepositoryName
+    }
+
+    It "Should install a module correctly to the required location with default CurrentUser scope" {
+        $isSkipped = $env:USINGAZAUTH -ne 'true'
+        Set-ItResult -Skipped:$isSkipped -Because "The tests require the USINGAZAUTH environment variable to be set to 'true' for ACR authentication."
+
+        Install-PSResource -Name $ACRTestModule -Repository $ACRRepositoryName
+        $installedModuleInfo = Get-InstalledPSResource -Name $ACRTestModule
+
+        if (!$IsMacOS) {
+            $installedModuleInfo | Should -Not -BeNullOrEmpty
+            $installedModuleInfo.Name | Should -Be $ACRTestModule
+            $installedModuleInfo.InstalledLocation.StartsWith($script:MyDocumentsModulesPath, [System.StringComparison]::OrdinalIgnoreCase) | Should -BeTrue
+
+            $module = Get-Module $ACRTestModule -ListAvailable
+            $module.Name | Should -Be $ACRTestModule
+            $module.ModuleBase.StartsWith($script:MyDocumentsModulesPath, [System.StringComparison]::OrdinalIgnoreCase) | Should -BeTrue
+        }
+    }
+
+    AfterAll {
+        if ($env:USINGAZAUTH -ne 'true') {
+            return
+        }
+
+        Remove-InstalledModules
     }
 }
